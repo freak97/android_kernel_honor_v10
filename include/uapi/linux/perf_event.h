@@ -347,7 +347,14 @@ struct perf_event_attr {
 		__u64		config1; /* extension of config */
 	};
 	union {
+#ifdef CONFIG_HAVE_HW_BREAKPOINT_ADDR_MASK
+		struct {
+			__u32		bp_len;
+			__u32		bp_addr_mask;
+		};
+#else
 		__u64		bp_len;
+#endif
 		__u64		config2; /* extension of config1 */
 	};
 	__u64	branch_sample_type; /* enum perf_branch_sample_type */

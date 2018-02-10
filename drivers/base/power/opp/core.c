@@ -259,9 +259,6 @@ unsigned long dev_pm_opp_get_max_volt_latency(struct device *dev)
 	reg = opp_table->regulator;
 	if (IS_ERR(reg)) {
 		/* Regulator may not be required for device */
-		if (reg)
-			dev_err(dev, "%s: Invalid regulator (%ld)\n", __func__,
-				PTR_ERR(reg));
 		rcu_read_unlock();
 		return 0;
 	}
@@ -719,7 +716,11 @@ static void _remove_opp_dev(struct opp_device *opp_dev,
 			    struct opp_table *opp_table)
 {
 	opp_debug_unregister(opp_dev, opp_table);
+#ifdef CONFIG_HISI_CPUFREQ
+	list_del_rcu(&opp_dev->node);
+#else
 	list_del(&opp_dev->node);
+#endif
 	call_srcu(&opp_table->srcu_head.srcu, &opp_dev->rcu_head,
 		  _kfree_opp_dev_rcu);
 }

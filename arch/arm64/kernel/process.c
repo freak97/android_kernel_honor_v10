@@ -54,6 +54,11 @@
 #include <asm/processor.h>
 #include <asm/stacktrace.h>
 
+#ifdef CONFIG_HISI_BB
+#include <linux/hisi/rdr_hisi_platform.h>
+#include <linux/smp.h>
+#endif
+
 #ifdef CONFIG_CC_STACKPROTECTOR
 #include <linux/stackprotector.h>
 unsigned long __stack_chk_guard __read_mostly;
@@ -90,6 +95,12 @@ void arch_cpu_idle_dead(void)
 }
 #endif
 
+#ifdef CONFIG_CPU_FREQ_GOV_INTERACTIVE
+void arch_cpu_idle_exit(void)
+{
+	idle_notifier_call_chain((unsigned long)IDLE_END);
+}
+#endif
 /*
  * Called by kexec, immediately prior to machine_kexec().
  *
@@ -165,10 +176,77 @@ void machine_restart(char *cmd)
 	while (1);
 }
 
+/*
+ * dump a block of kernel memory from around the given address
+ */
+static void show_data(unsigned long addr, int nbytes, const char *name)
+{
+	int	i, j;
+	int	nlines;
+	u32	*p;
+
+	/*
+	 * don't attempt to dump non-kernel addresses or
+	 * values that are probably just small negative numbers
+	 */
+	if (addr < PAGE_OFFSET || addr > -256UL)
+		return;
+
+	printk("\n%s: %#lx:\n", name, addr);
+
+	/*
+	 * round address down to a 32 bit boundary
+	 * and always dump a multiple of 32 bytes
+	 */
+	p = (u32 *)(addr & ~(sizeof(u32) - 1));
+	nbytes += (addr & (sizeof(u32) - 1));
+	nlines = (nbytes + 31) / 32;
+
+
+	for (i = 0; i < nlines; i++) {
+		/*
+		 * just display low 16 bits of address to keep
+		 * each line of the dump < 80 characters
+		 */
+		printk("%04lx ", (unsigned long)p & 0xffff);
+		for (j = 0; j < 8; j++) {
+			u32	data;
+			if (probe_kernel_address(p, data)) {
+				printk(" ********");
+			} else {
+				printk(" %08x", data);
+			}
+			++p;
+		}
+		printk("\n");
+	}
+}
+
+static void show_extra_register_data(struct pt_regs *regs, int nbytes)
+{
+	mm_segment_t fs;
+	unsigned int i;
+
+	fs = get_fs();
+	set_fs(KERNEL_DS);
+	show_data(regs->pc - nbytes, nbytes * 2, "PC");
+	show_data(regs->regs[30] - nbytes, nbytes * 2, "LR");
+	show_data(regs->sp - nbytes, nbytes * 2, "SP");
+	for (i = 0; i < 30; i++) {
+		char name[4];
+		snprintf(name, sizeof(name), "X%u", i);
+		show_data(regs->regs[i] - nbytes, nbytes * 2, name);
+	}
+	set_fs(fs);
+}
+
 void __show_regs(struct pt_regs *regs)
 {
 	int i, top_reg;
 	u64 lr, sp;
+#ifdef CONFIG_HISI_BB
+	unsigned int mask = 0x1 << get_cpu();
+#endif
 
 	if (compat_user_mode(regs)) {
 		lr = regs->compat_lr;
@@ -191,7 +269,15 @@ void __show_regs(struct pt_regs *regs)
 		if (i % 2 == 0)
 			printk("\n");
 	}
+	if (!user_mode(regs))
+#ifdef CONFIG_HISI_BB
+		if (!(g_cpu_in_ipi_stop & mask))
+#endif
+			show_extra_register_data(regs, 128);
 	printk("\n");
+#ifdef CONFIG_HISI_BB
+	put_cpu();
+#endif
 }
 
 void show_regs(struct pt_regs * regs)

@@ -28,6 +28,8 @@
 #include <linux/regulator/consumer.h>
 #include <linux/slab.h>
 #include <linux/thermal.h>
+#include <linux/hisi/hisi_cpufreq_dt.h>
+#include <linux/hisi/hifreq_hotplug.h>
 
 struct private_data {
 	struct device *cpu_dev;
@@ -41,14 +43,20 @@ static struct freq_attr *cpufreq_dt_attr[] = {
 	NULL,
 };
 
+#ifndef CONFIG_HISI_HW_VOTE_CPU_FREQ
 static int set_target(struct cpufreq_policy *policy, unsigned int index)
 {
 	struct private_data *priv = policy->driver_data;
 
+#ifdef CONFIG_HISI_BIG_MAXFREQ_HOTPLUG
+	if (hifreq_hotplug_is_enabled())
+		return bL_hifreq_hotplug_set_target(policy, priv->cpu_dev, policy->freq_table[index].frequency);
+#endif
+
 	return dev_pm_opp_set_rate(priv->cpu_dev,
 				   policy->freq_table[index].frequency * 1000);
 }
-
+#endif
 /*
  * An earlier version of opp-v1 bindings used to name the regulator
  * "cpu0-supply", we still need to handle that for backwards compatibility.
@@ -194,6 +202,13 @@ static int cpufreq_init(struct cpufreq_policy *policy)
 		}
 	}
 
+#ifdef CONFIG_HISI_CPUFREQ_DT
+	ret = hisi_cpufreq_set_supported_hw(policy);
+	if (ret)
+		dev_err(cpu_dev, "%s: failed to set supported hw: %d\n",
+			__func__, ret);
+#endif
+
 	/*
 	 * Initialize OPP tables for all policy->cpus. They will be shared by
 	 * all CPUs which have marked their CPUs shared with OPP bindings.
@@ -256,6 +271,9 @@ static int cpufreq_init(struct cpufreq_policy *policy)
 	if (suspend_opp)
 		policy->suspend_freq = dev_pm_opp_get_freq(suspend_opp) / 1000;
 	rcu_read_unlock();
+#ifdef CONFIG_HISI_CPUFREQ_DT
+	hisi_cpufreq_get_suspend_freq(policy);
+#endif
 
 	ret = cpufreq_table_validate_and_show(policy, freq_table);
 	if (ret) {
@@ -278,6 +296,10 @@ static int cpufreq_init(struct cpufreq_policy *policy)
 		transition_latency = CPUFREQ_ETERNAL;
 
 	policy->cpuinfo.transition_latency = transition_latency;
+
+#ifdef CONFIG_HISI_HW_VOTE_CPU_FREQ
+	hisi_cpufreq_policy_cur_init(policy);
+#endif
 
 	return 0;
 
@@ -302,10 +324,16 @@ static int cpufreq_exit(struct cpufreq_policy *policy)
 	cpufreq_cooling_unregister(priv->cdev);
 	dev_pm_opp_free_cpufreq_table(priv->cpu_dev, &policy->freq_table);
 	dev_pm_opp_of_cpumask_remove_table(policy->related_cpus);
+#ifdef CONFIG_HISI_CPUFREQ_DT
+	hisi_cpufreq_put_supported_hw(policy);
+#endif
 	if (priv->reg_name)
 		dev_pm_opp_put_regulator(priv->cpu_dev);
 
 	clk_put(policy->clk);
+#ifdef CONFIG_HISI_CPUFREQ
+	policy->clk = ERR_PTR(-EINVAL);
+#endif
 	kfree(priv);
 
 	return 0;
@@ -344,10 +372,19 @@ static void cpufreq_ready(struct cpufreq_policy *policy)
 }
 
 static struct cpufreq_driver dt_cpufreq_driver = {
+#ifdef CONFIG_HISI_CPUFREQ_DT
+	.flags = CPUFREQ_STICKY | CPUFREQ_NEED_INITIAL_FREQ_CHECK | CPUFREQ_HAVE_GOVERNOR_PER_POLICY,
+#else
 	.flags = CPUFREQ_STICKY | CPUFREQ_NEED_INITIAL_FREQ_CHECK,
+#endif
 	.verify = cpufreq_generic_frequency_table_verify,
+#ifdef CONFIG_HISI_HW_VOTE_CPU_FREQ
+	.target_index = hisi_hw_vote_target,
+	.get = hisi_cpufreq_get,
+#else
 	.target_index = set_target,
 	.get = cpufreq_generic_get,
+#endif
 	.init = cpufreq_init,
 	.exit = cpufreq_exit,
 	.ready = cpufreq_ready,
@@ -372,6 +409,10 @@ static int dt_cpufreq_probe(struct platform_device *pdev)
 		return ret;
 
 	dt_cpufreq_driver.driver_data = dev_get_platdata(&pdev->dev);
+#ifdef CONFIG_HISI_BIG_MAXFREQ_HOTPLUG
+	if (hifreq_hotplug_is_enabled())
+		dt_cpufreq_driver.flags |= CPUFREQ_ASYNC_NOTIFICATION;
+#endif
 
 	ret = cpufreq_register_driver(&dt_cpufreq_driver);
 	if (ret)

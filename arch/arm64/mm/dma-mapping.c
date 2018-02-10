@@ -28,6 +28,8 @@
 #include <linux/swiotlb.h>
 
 #include <asm/cacheflush.h>
+struct dma_map_ops *dma_ops;
+EXPORT_SYMBOL(dma_ops);
 
 static pgprot_t __get_dma_pgprot(struct dma_attrs *attrs, pgprot_t prot,
 				 bool coherent)
@@ -170,7 +172,7 @@ static void *__dma_alloc(struct device *dev, size_t size,
 	/* create a coherent mapping */
 	page = virt_to_page(ptr);
 	coherent_ptr = dma_common_contiguous_remap(page, size, VM_USERMAP,
-						   prot, NULL);
+						   prot, __builtin_return_address(0));
 	if (!coherent_ptr)
 		goto no_map;
 
@@ -513,6 +515,7 @@ EXPORT_SYMBOL(dummy_dma_ops);
 
 static int __init arm64_dma_init(void)
 {
+	dma_ops = &swiotlb_dma_ops;
 	return atomic_pool_init();
 }
 arch_initcall(arm64_dma_init);

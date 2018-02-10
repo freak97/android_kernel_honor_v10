@@ -18,6 +18,15 @@ config SECURITY_DMESG_RESTRICT
 
 	  If you are unsure how to answer this question, answer N.
 
+config SECURITY_PERF_EVENTS_RESTRICT
+	bool "Restrict unprivileged use of performance events"
+	depends on PERF_EVENTS
+	help
+	  If you say Y here, the kernel.perf_event_paranoid sysctl
+	  will be set to 3 by default, and no unprivileged use of the
+	  perf_event_open syscall will be permitted unless it is
+	  changed.
+
 config SECURITY
 	bool "Enable different security models"
 	depends on SYSFS
@@ -136,6 +145,7 @@ config HAVE_ARCH_HARDENED_USERCOPY
 config HARDENED_USERCOPY
 	bool "Harden memory copies between kernel and userspace"
 	depends on HAVE_ARCH_HARDENED_USERCOPY
+	depends on HAVE_HARDENED_USERCOPY_ALLOCATOR
 	select BUG
 	help
 	  This option checks for obviously wrong memory regions when
@@ -156,6 +166,13 @@ config HARDENED_USERCOPY_PAGESPAN
 	  however, several cases of this in the kernel that have not all
 	  been removed. This config is intended to be used only while
 	  trying to find such users.
+
+config HISI_HARDENED_USERCOPY_REPLACE_DIVISION
+	bool "Replace division operator in __check_heap_object"
+	depends on HARDENED_USERCOPY
+	help
+	  For improve the efficiency, this option use bitwise AND operator
+	  replace division operator in __check_heap_object.
 
 source security/selinux/Kconfig
 source security/smack/Kconfig
@@ -202,5 +219,10 @@ config DEFAULT_SECURITY
 	default "apparmor" if DEFAULT_SECURITY_APPARMOR
 	default "" if DEFAULT_SECURITY_DAC
 
+source security/hwselinux/Kconfig
+source security/check_root/Kconfig
+source security/hw_root_scan/Kconfig
+source security/kernel_harden/Kconfig
+source security/hkip_atkinfo/Kconfig
 endmenu
 
